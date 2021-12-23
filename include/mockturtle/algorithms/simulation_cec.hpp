@@ -74,11 +74,138 @@ public:
   bool run()
   {
     /* TODO: write your implementation here */
-    return false;
+    _st.split_var = compute_splitting_var(_ntk);
+    //std::cout<< "st_split_var est" << _st.split_var << std::endl;
+    _st.rounds = compute_rounds(_ntk, _st.split_var);
+    //std::cout<< "_st.roundsmake est" << _st.rounds << std::endl;
+
+    pattern_t patterns (_ntk);
+    init_patterns(_ntk, _st.split_var,patterns);
+    //simulate (_ntk, patterns);
+    default_simulator<kitty::dynamic_truth_table> sim(_st.split_var);
+    simulate_nodes ( _ntk, patterns, sim);
+    if (!check_equivalence ( _ntk, patterns) )
+    {
+      return false;
+    }
+    for (uint32_t i=1; i<_st.rounds; ++i)
+    {
+       clean_pattern(patterns );
+       update_patterns( patterns, i);
+       simulate_nodes ( _ntk, patterns, sim);
+       if (!check_equivalence ( _ntk, patterns) )
+       {
+         return false;
+       }
+    }
+    return true;
   }
 
 private:
   /* you can add additional methods here */
+
+//computes the split variable
+  uint32_t compute_splitting_var(Ntk& _nkt )
+  {
+    if (_nkt.num_pis() <= 6) return _nkt.num_pis();
+    else
+    {
+      uint32_t m = log((1<<29)/_nkt._storage->nodes.size()-32)/log(2) + 3;
+      return std::min(m,_nkt.num_pis());
+    }
+  }
+
+//computes the number of rounds
+  uint32_t compute_rounds(Ntk& _ntk, uint32_t split_var)
+  {
+     return 1<< (_ntk.num_pis() - split_var);
+  }
+
+void clean_pattern( pattern_t& patterns ){
+    _ntk.foreach_gate( [&]( auto const& n )
+    {
+       patterns.erase(n);
+    } );
+  }
+//initialises the pattern of split_var variables
+
+
+  void init_patterns (Ntk& _netwk, uint32_t split_var, pattern_t& patterns)
+  {  
+     //pattern_t patterns(_ntk);
+     _netwk.foreach_pi( [&] ( auto const& n, auto i)
+     {
+       kitty::dynamic_truth_table tt (split_var);
+       if (i < split_var) 
+          {
+          kitty::create_nth_var (tt, i);
+          }
+          patterns [n] = tt;
+     });
+   }
+/*
+  void simulate (Ntk _ntk, pattern_t patterns)
+   {
+      default_simulator<kitty::dynamic_truth_table> sim(_ntk);
+      simulate_nodes ( _ntk, patterns, sim);
+   }
+  
+   */
+   
+   
+  bool check_equivalence ( Ntk& _netwk, pattern_t& patterns ) 
+  {
+    bool equivalent = true;
+    _netwk.foreach_po( [&]( auto const& f ) {
+
+    if ( _netwk.is_complemented( f ) )
+
+    {
+        if (!is_const0( ~patterns[f] ) )
+        {
+          equivalent = false;
+        }       
+    }
+
+    else
+
+    {
+        if (!is_const0( patterns[f] ) )
+        { 
+          equivalent = false;
+        }
+    }
+
+  });
+  return equivalent;
+ }
+ 
+
+//updating the pattern for each round
+  void update_patterns( pattern_t& patterns, uint32_t& i)
+  {
+      uint32_t round = i;
+      _ntk.foreach_pi( [&]( auto const& l, auto n ) 
+      {
+        if (n >= _st.split_var ){
+          if (round % 2 == 1) {
+             if ( is_const0(patterns[l]) ) patterns[l] = ~patterns[l];
+          }
+      
+        else {
+           if ( !is_const0(patterns[l]) ) patterns[l] = ~patterns[l];
+        }
+        round /= 2;
+  
+        }
+
+      } );
+    
+
+  }
+
+
+    
 
 private:
   Ntk& _ntk;
@@ -95,7 +222,7 @@ private:
  * This function implements a simulation-based combinational equivalence checker.
  * The implementation creates a miter network and run several rounds of simulation
  * to verify the functional equivalence. For memory and speed reasons this approach
- * is limited up to 40 input networks. It returns an optional which is `nullopt`,
+ * is limited up to 40 input networks. It returns an optional which is nullopt,
  * if the network has more than 40 inputs.
  */
 template<class Ntk>
